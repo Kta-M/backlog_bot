@@ -8,6 +8,7 @@ module.exports = (robot) ->
   # 環境変数
   space_key = process.env.BACKLOG_SPACE_KEY
   api_key   = process.env.BACKLOG_API_KEY
+  channel   = process.env.BACKLOG_SEND_CHANNEL
   
   # 更新タイプ
   ACTION_TYPE =
@@ -24,30 +25,25 @@ module.exports = (robot) ->
   # 課題のステータス
   TASK_STATUS = null
 
-  cronjob = new cronJob('0 * * * * *', () =>
-    envelope = room: "#general"
-    robot.send envelope, "cron-test"
-  )
-  cronjob.start()
-
-  robot.send "tes1"
-  
+  # リセット
   robot.respond /reset/i, (msg) ->
     last_id_key = "#backlog_last_id_#{space_key}"
     robot.brain.set last_id_key, null
+    msg.send "reset: done"
 
-  robot.respond /fetch/i, (msg) ->
+  # 毎分確認
+  cronjob = new cronJob('0 * * * * *', () =>
 
     # 状態一覧を取得しておく
     if TASK_STATUS == null
-      request = msg.http("https://#{space_key}.backlog.jp/api/v2/statuses")
+      request = robot.http("https://#{space_key}.backlog.jp/api/v2/statuses")
                           .query(apiKey: api_key)
                           .get()
       request (err, res, body) ->
         TASK_STATUS = JSON.parse body
 
     # 最近の更新を取得(デフォルトで20件：1分ごとに確認するのでこれで問題ないと思う)
-    request = msg.http("https://#{space_key}.backlog.jp/api/v2/space/activities")
+    request = robot.http("https://#{space_key}.backlog.jp/api/v2/space/activities")
                         .query(apiKey: api_key)
                         .get()
     request (err, res, body) ->
@@ -110,8 +106,11 @@ module.exports = (robot) ->
                   message += "\n> [#{change.field}: #{change.new_value}]"
 
           # メッセージ送信
-          msg.send message
+          envelope = room: channel
+          robot.send envelope, message
 
       # どこまで確認したかを保存しておく
       robot.brain.set last_id_key, json[0].id
 
+  )
+  cronjob.start()
