@@ -46,7 +46,6 @@ module.exports = (robot) ->
       # 初回は最新のIDを取るだけで終了
       last_id_key = "#backlog_last_id_#{space_key}"
       last_id     = robot.brain.get last_id_key
-      msg.send last_id
       if last_id == null
         robot.brain.set last_id_key, json[5].id   # テスト用に一旦5にしておく
         return
@@ -94,7 +93,7 @@ module.exports = (robot) ->
               switch change.field
                 when 'status'
                   # ステータス名の取り方は手抜き
-                  message += "\n> [状態: #{TASK_STATUS[parseInt(change.new_value)+1].name}]"
+                  message += "\n> [状態: #{TASK_STATUS[parseInt(change.new_value)-1].name}]"
                 when 'assigner'
                   message += "\n> [担当者: #{change.new_value}]"
                 else
