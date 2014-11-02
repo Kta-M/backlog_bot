@@ -25,7 +25,8 @@ module.exports = (robot) ->
   TASK_STATUS = null
 
   new cron '* * * * *', () =>
-    robot.send {room: "#general"}, "corn_test"
+    robot.send {room: "#general"}, "cron_test"
+    , null, true
   
   robot.respond /reset/i, (msg) ->
     last_id_key = "#backlog_last_id_#{space_key}"
