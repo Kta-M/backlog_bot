@@ -28,9 +28,6 @@ module.exports = (robot) ->
 
   robot.respond /fetch/i, (msg) ->
 
-    msg.send space_key
-    msg.send api_key
-
     # 状態一覧を取得しておく
     if TASK_STATUS == null
       request = msg.http("https://#{space_key}.backlog.jp/api/v2/statuses")
