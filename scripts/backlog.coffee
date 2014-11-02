@@ -1,7 +1,7 @@
 # Description:
 #   Backlogの課題更新監視
 
-cron = require('cron').CronJob
+cronJob = require('cron').CronJob
 
 module.exports = (robot) ->
 
@@ -24,9 +24,13 @@ module.exports = (robot) ->
   # 課題のステータス
   TASK_STATUS = null
 
-  new cron '* * * * *', () =>
-    robot.send {room: "#general"}, "cron_test"
-    , null, true
+  cronjob = new cronJob('0 * * * * *', () =>
+    envelope = room: "#general"
+    robot.send envelope, "cron-test"
+  )
+  cronjob.start()
+
+  robot.send "tes1"
   
   robot.respond /reset/i, (msg) ->
     last_id_key = "#backlog_last_id_#{space_key}"
