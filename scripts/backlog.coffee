@@ -5,11 +5,13 @@ cronJob = require('cron').CronJob
 
 module.exports = (robot) ->
 
+  #--------------------------------------------------------------------
   # 環境変数
   space_keys = process.env.BACKLOG_SPACE_KEYS.split(',')
   api_keys   = process.env.BACKLOG_API_KEYS.split(',')
   channels   = process.env.BACKLOG_SEND_CHANNELS.split(',')
   
+  #--------------------------------------------------------------------
   # 更新タイプ
   ACTION_TYPE =
     task_create  : 1
@@ -25,12 +27,14 @@ module.exports = (robot) ->
   # 課題のステータス
   TASK_STATUS = null
 
+  #--------------------------------------------------------------------
   # リセット
   robot.respond /reset/i, (msg) ->
     last_id_key = "#backlog_last_id_#{space_key}"
     robot.brain.set last_id_key, null
     msg.send "reset: done"
 
+  #--------------------------------------------------------------------
   # cron登録
   for space_key, space_idx in space_keys
     api_key = api_keys[space_idx]
@@ -83,8 +87,8 @@ module.exports = (robot) ->
             message =  "#{json[idx].createdUser.name}さんが#{ACTION_MESSAGE[action_type-1]}\n"
 
             # URL
-            message += "> https://#{space_key}.backlog.jp/view/#{json[idx].project.projectKey}-#{json[idx].content.key_id}"
-            message += "#comment-#{json[idx].content.id}" if action_type == ACTION_TYPE.task_update || action_type == ACTION_TYPE.task_comment
+            message += "https://#{space_key}.backlog.jp/view/#{json[idx].project.projectKey}-#{json[idx].content.key_id}"
+            message += "#comment-#{json[idx].content.comment.id}" if action_type == ACTION_TYPE.task_update || action_type == ACTION_TYPE.task_comment
             message += "\n"
 
             # 課題タイトル
@@ -119,3 +123,5 @@ module.exports = (robot) ->
 
     )
     cronjob.start()
+
+  #--------------------------------------------------------------------
