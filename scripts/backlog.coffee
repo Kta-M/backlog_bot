@@ -71,7 +71,7 @@ module.exports = (robot) ->
         last_id_key = get_last_id_key(space_key)
         last_id     = robot.brain.get last_id_key
         if last_id == null
-          robot.brain.set last_id_key, json[5].id
+          robot.brain.set last_id_key, json[0].id
           return
 
         # 前回更新地点を探す
@@ -85,7 +85,6 @@ module.exports = (robot) ->
         return if last_id_idx == 0
 
         # 更新分を表示していく
-        robot.send {room: channel}, last_id_idx
         for update_idx in [last_id_idx-1..0]
 
           update_info = json[update_idx]
