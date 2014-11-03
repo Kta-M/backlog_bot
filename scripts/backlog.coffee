@@ -1,55 +1,64 @@
 # Description:
 #   Backlogの課題更新監視
 
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# cron
 cronJob = require('cron').CronJob
 
+#----------------------------------------------------------------------
+# 環境変数
+SPACE_KEYS = process.env.BACKLOG_SPACE_KEYS.split(',')
+API_KEYS   = process.env.BACKLOG_API_KEYS.split(',')
+CHANNELS   = process.env.BACKLOG_SEND_CHANNELS.split(',')
+
+#----------------------------------------------------------------------
+# 更新タイプ
+ACTION_TYPE =
+  'task_create':
+    'id': 1
+    'message': '課題を追加しました。'
+  'task_update':
+    'id': 2
+    'message': '課題を更新しました。'
+  'task_comment':
+    'id': 3
+    'message': '課題にコメントしました。'
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# 動作定義
 module.exports = (robot) ->
 
-  #--------------------------------------------------------------------
-  # 環境変数
-  space_keys = process.env.BACKLOG_SPACE_KEYS.split(',')
-  api_keys   = process.env.BACKLOG_API_KEYS.split(',')
-  channels   = process.env.BACKLOG_SEND_CHANNELS.split(',')
-  
-  #--------------------------------------------------------------------
-  # 更新タイプ
-  ACTION_TYPE =
-    task_create  : 1
-    task_update  : 2
-    task_comment : 3
-    max          : 3
-
-  # 各更新タイプに対するメッセージ
-  ACTION_MESSAGE = ['課題を追加しました。',
-                    '課題を更新しました。',
-                    '課題にコメントしました。']
-
-  # 課題のステータス
-  TASK_STATUS = null
+  # 初期化
+  for space_key, idx in SPACE_KEYS
+    api_key = API_KEYS[idx]
+    initialize(robot, space_key, api_key)
 
   #--------------------------------------------------------------------
   # リセット
-  robot.respond /reset/i, (msg) ->
-    last_id_key = "#backlog_last_id_#{space_key}"
-    robot.brain.set last_id_key, null
-    msg.send "reset: done"
+  robot.respond /reset (.*)/i, (msg) ->
+    space_key = msg.match[1]
+    api_key = null
+    for s, idx in SPACE_KEYS
+      if space_key == s
+        api_key = API_KEYS[idx]
+
+    # スペースが見つからなければ終了
+    if api_key == null
+      msg.send "reset: space_key \"#{space_key}\" was not found."
+      return 
+
+    # 指定されたスペースに対して初期化を実行
+    initialize(robot, space_key, api_key)
+    msg.send "reset: done for #{space_key}"
 
   #--------------------------------------------------------------------
   # cron登録
-  for space_key, space_idx in space_keys
-    api_key = api_keys[space_idx]
-    channel = channels[space_idx]
+  for space_key, space_idx in SPACE_KEYS
+    api_key = API_KEYS[space_idx]
+    channel = CHANNELS[space_idx]
 
     # 毎分確認
     cronjob = new cronJob("#{(space_idx*5)%60} * * * * *", () =>
-
-      # 状態一覧を取得しておく
-      if TASK_STATUS == null
-        request = robot.http("https://#{space_key}.backlog.jp/api/v2/statuses")
-                            .query(apiKey: api_key)
-                            .get()
-        request (err, res, body) ->
-          TASK_STATUS = JSON.parse body
 
       # 最近の更新を取得(デフォルトで20件：1分ごとに確認するのでこれで問題ないと思う)
       request = robot.http("https://#{space_key}.backlog.jp/api/v2/space/activities")
@@ -59,7 +68,7 @@ module.exports = (robot) ->
         json = JSON.parse body
         
         # 初回は最新のIDを取るだけで終了
-        last_id_key = "#backlog_last_id_#{space_key}"
+        last_id_key = get_last_id_key(space_key)
         last_id     = robot.brain.get last_id_key
         if last_id == null
           robot.brain.set last_id_key, json[5].id   # テスト用に一旦5にしておく
@@ -67,48 +76,52 @@ module.exports = (robot) ->
 
         # 前回更新地点を探す
         last_id_idx = 0
-        for update_info, idx in json
+        for update_info, update_idx in json
           if update_info.id == last_id
-            last_id_idx = idx
+            last_id_idx = update_idx
             break
 
         # 更新なしなら終了
         return if last_id_idx == 0
 
         # 更新分を表示していく
-        for idx in [last_id_idx-1..0]
+        robot.send {room: channel}, last_id_idx
+        for update_idx in [last_id_idx-1..0]
+
+          update_info = json[update_idx]
 
           # 更新タイプ
-          action_type = json[idx].type
+          action_type_id = parseInt(update_info.type)
+          action_message = search_action_message(action_type_id)
 
-          # 課題の更新のみ取得
-          if action_type <= ACTION_TYPE.max
+          # 更新タイプに対応するメッセージがあれば通知
+          # 現状では課題関連の更新のみ対応
+          if action_message
             # ユーザー名、更新タイプ
-            message =  "#{json[idx].createdUser.name}さんが#{ACTION_MESSAGE[action_type-1]}\n"
+            message =  "#{update_info.createdUser.name}さんが#{action_message}\n"
 
             # URL
-            message += "https://#{space_key}.backlog.jp/view/#{json[idx].project.projectKey}-#{json[idx].content.key_id}"
-            message += "#comment-#{json[idx].content.comment.id}" if action_type == ACTION_TYPE.task_update || action_type == ACTION_TYPE.task_comment
+            message += "https://#{space_key}.backlog.jp/view/#{update_info.project.projectKey}-#{update_info.content.key_id}"
+            message += "#comment-#{update_info.content.comment.id}" if action_type_id == ACTION_TYPE['task_update']['id'] || action_type_id == ACTION_TYPE['task_comment']['id']
             message += "\n"
 
             # 課題タイトル
-            message += "> *#{json[idx].content.summary}*\n"
+            message += "> *#{update_info.content.summary}*\n"
 
             # 本文
-            if action_type == ACTION_TYPE.task_create
-              body = json[idx].content.description
+            if action_type_id == ACTION_TYPE['task_create']['id']
+              body = update_info.content.description
             else
-              body = json[idx].content.comment.content
+              body = update_info.content.comment.content
             message += "> #{body[0..100].replace(/\n/g, '\n> ')}"
             message += "..." if body.length > 100
 
             # 状態更新
-            if action_type == ACTION_TYPE.task_update
-              for change in json[idx].content.changes
+            if action_type_id == ACTION_TYPE['task_update']['id']
+              for change in update_info.content.changes
                 switch change.field
                   when 'status'
-                    # ステータス名の取り方は手抜き
-                    message += "\n> [状態: #{TASK_STATUS[parseInt(change.new_value)-1].name}]"
+                    message += "\n> [状態: #{search_task_status_name(JSON.parse(robot.brain.get(get_task_status_key(space_key))), parseInt(change.new_value))}]"
                   when 'assigner'
                     message += "\n> [担当者: #{change.new_value}]"
                   else
@@ -124,4 +137,44 @@ module.exports = (robot) ->
     )
     cronjob.start()
 
-  #--------------------------------------------------------------------
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# 各種パラメータを初期化
+initialize = (robot, space_key, api_key) ->
+
+  # 最終取得位置をnullに
+  robot.brain.set get_last_id_key(space_key), null
+
+  # ステータスを取得
+  request = robot.http("https://#{space_key}.backlog.jp/api/v2/statuses")
+                      .query(apiKey: api_key)
+                      .get()
+  request (err, res, body) ->
+    robot.brain.set get_task_status_key(space_key), body
+
+#----------------------------------------------------------------------
+# 更新に対するメッセージを取得
+search_action_message = (action_type_id) ->
+  for key, val of ACTION_TYPE
+    return val['message'] if action_type_id == val['id']
+
+  return null
+
+#----------------------------------------------------------------------
+# 課題のステータス名を検索
+search_task_status_name = (task_status_json, state_id) ->
+  return "undefined" if task_status_json == null
+
+  for task_state in task_status_json
+    return task_state.name if task_state.id == state_id
+
+  return "undefined"
+
+#----------------------------------------------------------------------
+
+# 最終取得位置のキー
+get_last_id_key = (space_key) ->
+  return "backlog_last_id_#{space_key}"
+
+# ステータスのキー
+get_task_status_key = (space_key) ->
+  return "backlog_task_status_key_#{space_key}"
