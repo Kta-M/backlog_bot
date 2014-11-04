@@ -121,6 +121,8 @@ module.exports = (robot) ->
                 switch change.field
                   when 'status'
                     message += "\n> [状態: #{search_task_status_name(JSON.parse(robot.brain.get(get_task_status_key(space_key))), parseInt(change.new_value))}]"
+                  when 'resolution'
+                    message += "\n> [完了理由: #{search_task_resolution_name(JSON.parse(robot.brain.get(get_task_resolution_key(space_key))), parseInt(change.new_value))}]"
                   when 'assigner'
                     message += "\n> [担当者: #{change.new_value}]"
                   else
@@ -150,6 +152,13 @@ initialize = (robot, space_key, api_key) ->
   request (err, res, body) ->
     robot.brain.set get_task_status_key(space_key), body
 
+  # 完了理由を取得
+  request = robot.http("https://#{space_key}.backlog.jp/api/v2/resolutions")
+                      .query(apiKey: api_key)
+                      .get()
+  request (err, res, body) ->
+    robot.brain.set get_task_resolution_key(space_key), body
+
 #----------------------------------------------------------------------
 # 更新に対するメッセージを取得
 search_action_message = (action_type_id) ->
@@ -161,13 +170,21 @@ search_action_message = (action_type_id) ->
 #----------------------------------------------------------------------
 # 課題のステータス名を検索
 search_task_status_name = (task_status_json, state_id) ->
-  return "undefined" if task_status_json == null
+  return __search_name_by_id(task_status_json, state_id)
 
-  for task_state in task_status_json
-    return task_state.name if task_state.id == state_id
+# 完了理由のステータス名を検索
+search_task_resolution_name = (task_resolution_json, resolution_id) ->
+  return __search_name_by_id(task_resolution_json, resolution_id)
+  
+# idから名前を取得
+__search_name_by_id = (json, id) ->
+  return "undefined" if json == null
+
+  for val in json
+    return val.name if val.id == id
 
   return "undefined"
-
+  
 #----------------------------------------------------------------------
 
 # 最終取得位置のキー
@@ -177,3 +194,7 @@ get_last_id_key = (space_key) ->
 # ステータスのキー
 get_task_status_key = (space_key) ->
   return "backlog_task_status_key_#{space_key}"
+
+# 完了理由のキー
+get_task_resolution_key = (space_key) ->
+  return "backlog_task_resolution_key_#{space_key}"
