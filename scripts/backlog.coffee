@@ -71,7 +71,7 @@ module.exports = (robot) ->
         last_id_key = get_last_id_key(space_key)
         last_id     = robot.brain.get last_id_key
         if last_id == null
-          robot.brain.set last_id_key, json[1].id
+          robot.brain.set last_id_key, json[5].id # @DEBUG: 本来はjson[0]
           return
 
         # 前回更新地点を探す
@@ -129,12 +129,10 @@ module.exports = (robot) ->
                     message += "\n> [#{change.field}: #{change.new_value}]"
 
             # メッセージ送信
-            envelope = room: channel
-            robot.send envelope, message
-            console.log message
+            send_message(robot, space_key, channel, update_info.id, message)
 
         # どこまで確認したかを保存しておく
-        robot.brain.set last_id_key, json[0].id
+        robot.brain.set last_id_key, json[5].id # @DEBUG: 本来はjson[0]
 
     )
     cronjob.start()
@@ -169,6 +167,59 @@ search_action_message = (action_type_id) ->
   return null
 
 #----------------------------------------------------------------------
+# メッセージを送信
+send_message = (robot, space_key, channel, message_id, str) ->
+  @log "Sending message : #{message_id}"
+
+  # 送信データ作成
+  str = robot.escapeHtml str
+  args = JSON.stringify
+    username   : robot.name
+    channel    : channel
+    text       : str
+
+  # 送信中リストに入れる
+  sending_list_add_id(space_key, message_id)
+
+  # 送信！
+  robot.post "/services/hooks/hubot", args, (err, val) ->
+    @log "Send result : #{val}"
+    robot.send {room: channel}, val
+    # 成功していたら送信中リストから外す
+    if err == nil
+      sending_list_del_id(space_key, message_id)
+    else if sending_list_get_send_num(space_key, message_id) == 1
+      @log "Failed to sending message : #{message_id}"
+      robot.send {room: channel}, message
+
+#----------------------------------------------------------------------
+# 送信中リストに入れる
+sending_list_add_id = (space_key, message_id) ->
+  key = get_sending_key(space_key)
+
+
+# 送信中リストから外す
+sending_list_del_id = (space_key, message_id) ->
+  key = get_sending_key(space_key)
+
+
+# 送信中リストに存在するか
+sending_list_exist(space_key, message_id) ->
+  key = get_sending_key(space_key)
+
+
+# 送信試行回数を取得
+sending_list_get_send_num(space_key, message_id) ->
+  key = get_sending_key(space_key)
+
+
+# 送信中リストにあるけど流れてしまったものを削除
+sending_cleanup = (space_key) ->
+  key = get_sending_key(space_key)
+
+
+
+#----------------------------------------------------------------------
 # 課題のステータス名を検索
 search_task_status_name = (task_status_json, state_id) ->
   return __search_name_by_id(task_status_json, state_id)
@@ -199,3 +250,7 @@ get_task_status_key = (space_key) ->
 # 完了理由のキー
 get_task_resolution_key = (space_key) ->
   return "backlog_task_resolution_key_#{space_key}"
+
+# 送信中メッセージのキー
+get_sending_key = (space_key) ->
+  return "backlog_sending_key_#{space_key}"
