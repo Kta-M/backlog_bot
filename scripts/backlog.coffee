@@ -172,7 +172,7 @@ search_action_message = (action_type_id) ->
 #----------------------------------------------------------------------
 # メッセージを送信
 send_message = (robot, space_key, channel, message_id, str) ->
-  robot.log "Sending message : #{message_id}"
+  console.log "Sending message : #{message_id}"
 
   # 送信データ作成
   str = robot.escapeHtml str
@@ -186,13 +186,13 @@ send_message = (robot, space_key, channel, message_id, str) ->
 
   # 送信！
   robot.post "/services/hooks/hubot", args, (err, val) ->
-    robot.log "Send result : #{val}"
+    console.log "Send result : #{val}"
     robot.send {room: channel}, val
     # 成功していたら送信中リストから外す
     if err == nil
       sending_list_del_id(space_key, message_id)
     else if sending_list_get_send_num(space_key, message_id) == 1
-      @log "Failed to sending message : #{message_id}"
+      console.og "Failed to sending message : #{message_id}"
       robot.send {room: channel}, message
 
 #----------------------------------------------------------------------
