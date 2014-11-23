@@ -204,12 +204,12 @@ sending_list_del_id = (space_key, message_id) ->
 
 
 # 送信中リストに存在するか
-sending_list_exist(space_key, message_id) ->
+sending_list_exist = (space_key, message_id) ->
   key = get_sending_key(space_key)
 
 
 # 送信試行回数を取得
-sending_list_get_send_num(space_key, message_id) ->
+sending_list_get_send_num = (space_key, message_id) ->
   key = get_sending_key(space_key)
 
 
