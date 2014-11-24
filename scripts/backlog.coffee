@@ -60,9 +60,6 @@ module.exports = (robot) ->
     # 毎分確認
     cronjob = new cronJob("#{(space_idx*5)%60} * * * * *", () =>
       
-      send_message(robot, space_key, channel, 0, "cron?")
-      robot.send {room: channel}, "cron!"
-
       # 最近の更新を取得(デフォルトで20件：1分ごとに確認するのでこれで問題ないと思う)
       request = robot.http("https://#{space_key}.backlog.jp/api/v2/space/activities")
                           .query(apiKey: api_key)
