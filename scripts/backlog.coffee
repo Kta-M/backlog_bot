@@ -129,8 +129,7 @@ module.exports = (robot) ->
                     message += "\n> [#{change.field}: #{change.new_value}]"
 
             # メッセージ送信
-            envelope = room: channel
-            robot.send envelope, message
+            robot.messageRoom "##{channel}", message
             console.log message
 
         # どこまで確認したかを保存しておく
