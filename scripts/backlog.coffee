@@ -71,7 +71,7 @@ module.exports = (robot) ->
         last_id_key = get_last_id_key(space_key)
         last_id     = robot.brain.get last_id_key
         if last_id == null
-          robot.brain.set last_id_key, json[1].id
+          robot.brain.set last_id_key, json[0].id
           return
 
         # 前回更新地点を探す
