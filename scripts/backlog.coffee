@@ -125,6 +125,12 @@ module.exports = (robot) ->
                     message += "\n> [完了理由: #{search_task_resolution_name(JSON.parse(robot.brain.get(get_task_resolution_key(space_key))), parseInt(change.new_value))}]"
                   when 'assigner'
                     message += "\n> [担当者: #{change.new_value}]"
+                  when 'attachment'
+                    message += "\n> [添付ファイル: #{change.new_value}]"
+                  when 'description'
+                    message += "\n> [変更内容]\n"
+                    message += "> #{change.new_value[0..100].replace(/\n/g, '\n> ')}"
+                    message += "> ..." if change.new_value.length > 100
                   else
                     message += "\n> [#{change.field}: #{change.new_value}]"
 
