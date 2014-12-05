@@ -126,7 +126,6 @@ module.exports = (robot) ->
         api_key   = params['api_key'] 
 
         # 最近の更新を取得(デフォルトで20件：1分ごとに確認するのでこれで問題ないと思う)
-        console.log "http request: #{space_key} #{api_key}"
         request = robot.http("https://#{space_key}.backlog.jp/api/v2/space/activities")
                             .query(apiKey: api_key)
                             .get()
@@ -134,7 +133,6 @@ module.exports = (robot) ->
           json = JSON.parse body
           req_space_key = res['req']['_headers']['host'].replace(/\.backlog\.jp/, '')
           req_params    = PROJECT_SETTINGS[req_space_key] 
-          console.log "http responce: #{space_key} #{req_space_key} #{err}"
 
           # 初回は最新のIDを取るだけで終了
           for channel, prj_ary of req_params['projects']
