@@ -8,7 +8,7 @@ cronJob = require('cron').CronJob
 
 #----------------------------------------------------------------------
 # デバッグフラグ
-IS_DEBUG     = true
+IS_DEBUG     = false
 
 # 環境変数のパラメータインデックス
 CHANNEL         = 0   # チャンネル名
@@ -45,11 +45,10 @@ for env_idx in [0..99]
     continue if idx < PROJECT_KEY
     PROJECT_SETTINGS[space_key][api_key][channel]['prj_key'][idx-PROJECT_KEY] = prj_key
 
-if IS_DEBUG || true
-  console.log PROJECT_SETTINGS
-  for space_key, space_val of PROJECT_SETTINGS
-    for api_key, api_val of space_val
-      console.log api_val
+console.log PROJECT_SETTINGS
+for space_key, space_val of PROJECT_SETTINGS
+  for api_key, api_val of space_val
+    console.log api_val
 
 #----------------------------------------------------------------------
 # 更新タイプ
