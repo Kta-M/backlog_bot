@@ -1,3 +1,4 @@
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Description:
 #   Backlogの課題更新監視
 
@@ -6,11 +7,15 @@
 cronJob = require('cron').CronJob
 
 #----------------------------------------------------------------------
+# デバッグフラグ
+IS_DEBUG     = true
+
 # 環境変数のパラメータインデックス
-CHANNEL     = 0
-API_KEY     = 1
-SPACE_KEY   = 2
-PROJECT_KEY = 3
+CHANNEL         = 0   # チャンネル名
+MAX_MSG_LENGTH  = 1   # メッセージの最大文字数
+API_KEY         = 2   # APIキー
+SPACE_KEY       = 3   # Backlogのスペース名
+PROJECT_KEY     = 4   # Backlogのプロジェクト名(可変長で複数可)
 
 # ここにプロジェクトの設定を格納する
 PROJECT_SETTINGS = {}
@@ -32,15 +37,19 @@ for env_idx in [0..99]
 
   space_key = setting[SPACE_KEY]
   channel   = setting[CHANNEL]
-  PROJECT_SETTINGS[space_key] = PROJECT_SETTINGS[space_key] or {api_key: setting[API_KEY], projects: {}}
-  PROJECT_SETTINGS[space_key]['projects'][channel] = []
+  api_key   = setting[API_KEY]
+  PROJECT_SETTINGS[space_key] = PROJECT_SETTINGS[space_key] or {}
+  PROJECT_SETTINGS[space_key][api_key] = PROJECT_SETTINGS[space_key][api_key] or {}
+  PROJECT_SETTINGS[space_key][api_key][channel] = {max_msg_len: setting[MAX_MSG_LENGTH], prj_key: []}
   for prj_key, idx in setting
     continue if idx < PROJECT_KEY
-    PROJECT_SETTINGS[space_key]['projects'][channel][idx-PROJECT_KEY] = prj_key
+    PROJECT_SETTINGS[space_key][api_key][channel]['prj_key'][idx-PROJECT_KEY] = prj_key
 
-console.log "-----------------------------------------"
-console.log PROJECT_SETTINGS
-console.log "-----------------------------------------"
+if IS_DEBUG || true
+  console.log PROJECT_SETTINGS
+  for space_key, space_val of PROJECT_SETTINGS
+    for api_key, api_val of space_val
+      console.log api_val
 
 #----------------------------------------------------------------------
 # 更新タイプ
@@ -111,114 +120,155 @@ module.exports = (robot) ->
   #--------------------------------------------------------------------
   # cron登録
   second = 0
-  for sk, prm of PROJECT_SETTINGS
-    second = (second + 5) % 60
+  for sk, sv of PROJECT_SETTINGS
+    for ak, av of sv
+      second = ((second + 5) % 60) + Math.floor((second + 5) / 60)
+      second = '*' if IS_DEBUG
       
-    # 毎分確認
-    cronjob = new cronJob({
-      cronTime: "#{second} * * * * *",
-      start: true,
-      context: {space_key: sk},
-      onTick: () ->
+      # 毎分確認
+      cronjob = new cronJob({
+        cronTime: "#{second} * * * * *",
+        start: true,
+        context: {robot: robot, space_key: sk, api_key: ak},
+        onTick: cron_func
+      })
 
-        space_key = this.space_key
-        params    = PROJECT_SETTINGS[space_key]
-        api_key   = params['api_key'] 
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# cronで呼び出されるメソッド
+cron_func = () ->
+  robot     = this.robot
+  space_key = this.space_key
+  api_key   = this.api_key 
 
-        # 最近の更新を取得(デフォルトで20件：1分ごとに確認するのでこれで問題ないと思う)
-        request = robot.http("https://#{space_key}.backlog.jp/api/v2/space/activities")
-                            .query(apiKey: api_key)
-                            .get()
-        request (err, res, body) ->
-          json = JSON.parse body
-          req_space_key = res['req']['_headers']['host'].replace(/\.backlog\.jp/, '')
-          req_params    = PROJECT_SETTINGS[req_space_key] 
+  # 最近の更新を取得
+  request = robot.http("https://#{space_key}.backlog.jp/api/v2/space/activities")
+                      .query('apiKey': api_key)
+                      .query('count': 100)
+                      .query('activityTypeId[0]': ACTION_TYPE['task_create']['id'])
+                      .query('activityTypeId[1]': ACTION_TYPE['task_update']['id'])
+                      .query('activityTypeId[2]': ACTION_TYPE['task_comment']['id'])
+                      .get()
+  request (err, res, body) ->
+    json = JSON.parse body
+    req_space_key  = res['req']['_headers']['host'].replace(/\.backlog\.jp/, '')
+    req_api_key    = res['req']['path'].replace(/\/api\/v2\/space\/activities\?apiKey=/, '').replace(/&count.*/, '')
+    req_prj_params = PROJECT_SETTINGS[req_space_key][req_api_key] 
 
-          # 初回は最新のIDを取るだけで終了
-          for channel, prj_ary of req_params['projects']
-            last_id_key = get_last_id_key(req_space_key, channel)
-            last_id     = robot.brain.get last_id_key
-            if last_id == null
-              robot.brain.set last_id_key, json[0].id
-              return
+    # 初回は最新のIDを取るだけで終了
+    for channel, prj_ary of req_prj_params
+      last_id_key = get_last_id_key(req_space_key, channel)
+      last_id     = robot.brain.get(last_id_key)
+      robot.brain.set(last_id_key, json[5].id) if IS_DEBUG
+      robot.brain.set(last_id_key, json[0].id) if !last_id
 
-          # 前回更新地点を探す
-          last_id_idx = 0
-          for update_info, update_idx in json
-            if update_info.id == last_id
-              last_id_idx = update_idx
-              break
+    # 前回更新地点を探す
+    last_id_idx = get_last_id_idx(json, last_id)
+    return if !last_id_idx
 
-          # 更新なしなら終了
-          return if last_id_idx == 0
+    # 更新分を表示していく
+    for update_idx in [last_id_idx-1..0]
+      update_info = json[update_idx]
 
-          # 更新分を表示していく
-          for update_idx in [last_id_idx-1..0]
+      # 表示先のチャンネルを取得
+      channel = get_channel(update_info, req_prj_params)
+      continue if !channel
 
-            update_info = json[update_idx]
+      # メッセージ送信
+      messages = generate_message(robot, update_info, req_space_key, parseInt(req_prj_params[channel]['max_msg_len']))
+      if messages
+        for message in messages
+          robot.messageRoom "##{channel}", message
 
-            # 表示先のチャンネルを取得
-            channel = null
-            update_info_prj_key = update_info['project']['projectKey']
-            for params_channel, params_prj_ary of req_params['projects']
-              for params_prj_key in params_prj_ary
-                if params_prj_key == update_info_prj_key
-                  channel = params_channel
-                  break
-            continue if !channel
+    # どこまで確認したかを保存しておく
+    for channel, prj_ary of req_prj_params
+      last_id_key = get_last_id_key(req_space_key, channel)
+      robot.brain.set(last_id_key, json[0].id)
 
-            # 更新タイプ
-            action_type_id = parseInt(update_info.type)
-            action_message = search_action_message(action_type_id)
+#----------------------------------------------------------------------
+# 前回更新地点を取得
+get_last_id_idx = (json, last_id) ->
 
-            # 更新タイプに対応するメッセージがあれば通知
-            # 現状では課題関連の更新のみ対応
-            if action_message
-              # ユーザー名、更新タイプ
-              message =  "#{update_info.createdUser.name}さんが#{action_message}\n"
+  for update_info, update_idx in json
+    if update_info.id == last_id
+      return update_idx
 
-              # URL
-              message += "https://#{req_space_key}.backlog.jp/view/#{update_info.project.projectKey}-#{update_info.content.key_id}"
-              message += "#comment-#{update_info.content.comment.id}" if action_type_id == ACTION_TYPE['task_update']['id'] || action_type_id == ACTION_TYPE['task_comment']['id']
-              message += "\n"
+  return null
 
-              # 課題タイトル
-              message += "> *#{update_info.content.summary}*\n"
+#----------------------------------------------------------------------
+# 表示先のチャンネルを取得
+get_channel = (update_info, prj_info) ->
 
-              # 本文
-              if action_type_id == ACTION_TYPE['task_create']['id']
-                body = update_info.content.description
-              else
-                body = update_info.content.comment.content
-              message += "> #{body[0..100].replace(/\n/g, '\n> ')}"
-              message += "..." if body.length > 100
+  update_info_prj_key = update_info['project']['projectKey']
+  for channel, prj_params of prj_info
+    for prj_key in prj_params['prj_key']
+      if prj_key == update_info_prj_key
+        return channel 
 
-              # 状態更新
-              if action_type_id == ACTION_TYPE['task_update']['id']
-                for change in update_info.content.changes
-                  switch change.field
-                    when 'status'
-                      message += "\n> [状態: #{search_task_status_name(JSON.parse(robot.brain.get(get_task_status_key(req_space_key))), parseInt(change.new_value))}]"
-                    when 'resolution'
-                      message += "\n> [完了理由: #{search_task_resolution_name(JSON.parse(robot.brain.get(get_task_resolution_key(req_space_key))), parseInt(change.new_value))}]"
-                    when 'assigner'
-                      message += "\n> [担当者: #{change.new_value}]"
-                    when 'attachment'
-                      message += "\n> [添付ファイル: #{change.new_value}]"
-                    when 'description'
-                      message += "\n> [変更内容]\n"
-                      message += "> #{change.new_value[0..100].replace(/\n/g, '\n> ')}"
-                      message += "> ..." if change.new_value.length > 100
-                    else
-                      message += "\n> [#{change.field}: #{change.new_value}]"
+  return null
 
-              # メッセージ送信
-              robot.messageRoom "##{channel}", message
-              console.log message
+#----------------------------------------------------------------------
+# 更新タイプに対応するメッセージがあればメッセージ作成
+# 現状では課題関連の更新のみ対応
+generate_message = (robot, update_info, space_key, max_msg_len) -> 
 
-          # どこまで確認したかを保存しておく
-          robot.brain.set last_id_key, json[0].id
-    })
+  # 更新タイプ
+  action_type_id = parseInt(update_info.type)
+  action_message = search_action_message(action_type_id)
+  return null if !action_message
+
+  # ユーザー名、更新タイプ
+  message =  "#{update_info.createdUser.name}さんが#{action_message}\n"
+
+  # URL
+  message += "https://#{space_key}.backlog.jp/view/#{update_info.project.projectKey}-#{update_info.content.key_id}"
+  message += "#comment-#{update_info.content.comment.id}" if action_type_id == ACTION_TYPE['task_update']['id'] || action_type_id == ACTION_TYPE['task_comment']['id']
+  message += "\n"
+
+  # 課題タイトル
+  message += "> *#{update_info.content.summary}*\n"
+
+  # 本文
+  if action_type_id == ACTION_TYPE['task_create']['id']
+    body = update_info.content.description
+  else
+    body = update_info.content.comment.content
+
+  full_message = body
+  message += "> #{body[0...max_msg_len].replace(/\n/g, '\n> ')}"
+  message += "..." if body.length > max_msg_len
+
+  # 状態更新
+  if action_type_id == ACTION_TYPE['task_update']['id']
+    for change in update_info.content.changes
+      switch change.field
+        when 'status'
+          message += "\n> [状態: #{search_task_status_name(JSON.parse(robot.brain.get(get_task_status_key(space_key))), parseInt(change.new_value))}]"
+        when 'resolution'
+          message += "\n> [完了理由: #{search_task_resolution_name(JSON.parse(robot.brain.get(get_task_resolution_key(space_key))), parseInt(change.new_value))}]"
+        when 'assigner'
+          message += "\n> [担当者: #{change.new_value}]"
+        when 'attachment'
+          message += "\n> [添付ファイル: #{change.new_value}]"
+        when 'description'
+          message += "\n> [変更内容]\n"
+          message += "> #{change.new_value[0...max_msg_len].replace(/\n/g, '\n> ')}"
+          message += "> ..." if change.new_value.length > max_msg_len
+          full_message = change.new_value
+        else
+          message += "\n> [#{change.field}: #{change.new_value}]"
+
+  messages = [message]
+
+  # 全文表示の場合は以降の文章を小分けにして送信
+  # 送信順に表示されないようなので一旦ナシで
+  # full_length = full_message.length
+  # if is_full_message && full_length > max_msg_len
+    # for idx in [1..Math.floor(full_length / max_msg_len)]
+      # begin = max_msg_len * idx
+      # end   = max_msg_len * (idx+1)
+      # messages[idx] = "> #{body[begin...end].replace(/\n/g, '\n> ')}"
+
+  return messages
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # スペースの各種パラメータを読み込み
@@ -229,14 +279,14 @@ load_space_params = (robot, space_key, api_key) ->
                       .query(apiKey: api_key)
                       .get()
   request (err, res, body) ->
-    robot.brain.set get_task_status_key(space_key), body
+    robot.brain.set(get_task_status_key(space_key), body)
 
   # 完了理由を取得
   request = robot.http("https://#{space_key}.backlog.jp/api/v2/resolutions")
                       .query(apiKey: api_key)
                       .get()
   request (err, res, body) ->
-    robot.brain.set get_task_resolution_key(space_key), body
+    robot.brain.set(get_task_resolution_key(space_key), body)
 
   return true
 
@@ -245,7 +295,7 @@ load_space_params = (robot, space_key, api_key) ->
 initialize_pos = (robot, space_key, channel) ->
   
   # 最終取得位置をnullに
-  robot.brain.set get_last_id_key(space_key, channel), null
+  robot.brain.set(get_last_id_key(space_key, channel), null)
 
   return true
 
