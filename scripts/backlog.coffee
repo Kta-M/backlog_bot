@@ -139,6 +139,8 @@ cron_func = () ->
   space_key = this.space_key
   api_key   = this.api_key 
 
+  console.log("cron_exec > space: #{space_key} / api: #{api_key}")
+
   # 最近の更新を取得
   request = robot.http("https://#{space_key}.backlog.jp/api/v2/space/activities")
                       .query('apiKey': api_key)
@@ -177,6 +179,7 @@ cron_func = () ->
       if messages
         for message in messages
           robot.messageRoom "##{channel}", message
+          console.log("send_message > #{channel} / #{message[0...20]}")
 
     # どこまで確認したかを保存しておく
     for channel, prj_ary of req_prj_params
