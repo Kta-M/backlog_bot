@@ -71,8 +71,7 @@ module.exports = (robot) ->
   for space_key, space_params of PROJECT_SETTINGS
     for api_key, api_params of space_params
       load_space_params(robot, space_key, api_key)
-      for channel, prj_ary of api_params
-        initialize_pos(robot, space_key, channel)
+      set_last_id(robot, space_key, api_key, null)
 
   #--------------------------------------------------------------------
   # スペースのパラメータを再読み込み
@@ -85,37 +84,37 @@ module.exports = (robot) ->
       return
 
     # スペースが見つからなければ終了
-    api_key = PROJECT_SETTINGS[space_key]['api_key']
-    if !api_key
-      msg.send "reload_space_params: api_key was not found."
-      return 
-
-    if load_space_params(robot, space_key, api_key)
-      msg.send "reload_space_params: done for #{space_key}"
-    else
-      msg.send "reload_space_params: error."
+    for api_key, api_params of PROJECT_SETTINGS[space_key]
+      if load_space_params(robot, space_key, api_key)
+        msg.send "reload_space_params: done for #{space_key}"
+      else
+        msg.send "reload_space_params: error."
+      return
+    
+    msg.send "reload_space_params: api_key was not found."
 
   #--------------------------------------------------------------------
-  # プロジェクトの最終読み込み位置リセット
-  robot.respond /reset_project (.*) (.*)/i, (msg) ->
+  # 最終読み込み位置セット
+  robot.respond /set_project_last_id (.*) (.*) (.*)/i, (msg) ->
     space_key = msg.match[1]
-    channel   = msg.match[2]
+    api_key   = msg.match[2]
+    new_id    = parseInt(msg.match[3])
     
     # スペースキーが見つからなければ終了
     if !PROJECT_SETTINGS[space_key]
-      msg.send "reset_project_pos: space_key \"#{space_key}\" was not found."
+      msg.send "set_project_last_id: space_key \"#{space_key}\" was not found."
       return
     
-    # チャンネルが見つからなければ終了
-    if !PROJECT_SETTINGS[space_key]['projects'][channel]
-      msg.send "reset_project_pos: channel \"#{channel}\" was not found."
+    # apiキーを検索
+    if !PROJECT_SETTINGS[space_key][api_key]
+      msg.send "set_project_last_id: api_key \"#{api_key}\" was not found."
       return
 
-    # 指定されたスペースに対して初期化を実行
-    if initialize_pos(robot, space_key, channel)
-      msg.send "reset_project_pos: done for \"#{space_key} / #{channel}\""
+    # 指定されたスペースに対して読み込み位置を設定
+    if set_last_id(robot, space_key, api_key, new_id)
+      msg.send "set_project_last_id: done for \"#{space_key}\" / \"#{api_key}\" / #{new_id}"
     else
-      msg.send "reset_project_pos: error."
+      msg.send "set_project_last_id: error."
 
   #--------------------------------------------------------------------
   # cron登録
@@ -140,8 +139,8 @@ cron_func = () ->
   space_key = this.space_key
   api_key   = this.api_key 
 
-  console.log("cron_exec > space: #{space_key} / api: #{api_key}")
-
+  console.log("cron_exec [#{api_key[0..5]}] > space: #{space_key} / api: #{api_key}")
+  
   # 最近の更新を取得
   request = robot.http("https://#{space_key}.backlog.jp/api/v2/space/activities")
                       .query('apiKey': api_key)
@@ -157,14 +156,16 @@ cron_func = () ->
     req_prj_params = PROJECT_SETTINGS[req_space_key][req_api_key] 
 
     # 初回は最新のIDを取るだけで終了
-    for channel, prj_ary of req_prj_params
-      last_id_key = get_last_id_key(req_space_key, channel)
-      last_id     = robot.brain.get(last_id_key)
-      robot.brain.set(last_id_key, json[5].id) if IS_DEBUG
-      robot.brain.set(last_id_key, json[0].id) if !last_id
+    last_id_key = get_last_id_key(req_space_key, req_api_key)
+    last_id     = robot.brain.get(last_id_key)
+    robot.brain.set(last_id_key, json[5].id) if IS_DEBUG
+    if !last_id
+      robot.brain.set(last_id_key, json[0].id)
+      return
 
     # 前回更新地点を探す
     last_id_idx = get_last_id_idx(json, last_id)
+    console.log("search_last_id [#{api_key[0..5]}] > last_id -> #{last_id} / last_id_idx -> #{last_id_idx}")
     return if !last_id_idx
 
     # 更新分を表示していく
@@ -180,12 +181,11 @@ cron_func = () ->
       if messages
         for message in messages
           robot.messageRoom "##{channel}", message
-          console.log("send_message > #{channel} / #{message[0...20]}")
+          console.log("send_message [#{api_key[0..5]}] > #{channel} / #{message[0...20]}")
 
     # どこまで確認したかを保存しておく
-    for channel, prj_ary of req_prj_params
-      last_id_key = get_last_id_key(req_space_key, channel)
-      robot.brain.set(last_id_key, json[0].id)
+    last_id_key = get_last_id_key(req_space_key, api_key)
+    robot.brain.set(last_id_key, json[0].id)
 
 #----------------------------------------------------------------------
 # 前回更新地点を取得
@@ -282,7 +282,7 @@ load_space_params = (robot, space_key, api_key) ->
                       .query(apiKey: api_key)
                       .get()
   request (err, res, body) ->
-    console.log("#{space_key} / #{api_key} / #{body}")
+    console.log("load_space_params > #{space_key} / #{api_key} / #{body}")
     robot.brain.set(get_task_status_key(space_key), body)
 
   # 完了理由を取得
@@ -290,18 +290,15 @@ load_space_params = (robot, space_key, api_key) ->
                       .query(apiKey: api_key)
                       .get()
   request (err, res, body) ->
-    console.log("#{space_key} / #{api_key} / #{body}")
+    console.log("load_space_params > #{space_key} / #{api_key} / #{body}")
     robot.brain.set(get_task_resolution_key(space_key), body)
 
   return true
 
 #----------------------------------------------------------------------
-# 最終読み込み位置をnullに
-initialize_pos = (robot, space_key, channel) ->
-  
-  # 最終取得位置をnullに
-  robot.brain.set(get_last_id_key(space_key, channel), null)
-
+# 最終読み込み位置を設定
+set_last_id = (robot, space_key, api_key, new_id) ->
+  robot.brain.set(get_last_id_key(space_key, api_key), new_id)
   return true
 
 #----------------------------------------------------------------------
@@ -333,8 +330,8 @@ __search_name_by_id = (json, id) ->
 #----------------------------------------------------------------------
 
 # 最終取得位置のキー
-get_last_id_key = (space_key, channel) ->
-  return "backlog_last_id_#{space_key}_#{channel}"
+get_last_id_key = (space_key, api_key) ->
+  return "backlog_last_id_#{space_key}_#{api_key}"
 
 # ステータスのキー
 get_task_status_key = (space_key) ->
