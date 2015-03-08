@@ -68,10 +68,11 @@ ACTION_TYPE =
 module.exports = (robot) ->
 
   # 初期化
-  for space_key, params of PROJECT_SETTINGS
-    load_space_params(robot, space_key, params['api_key'])
-    for channel, prj_ary of params
-      initialize_pos(robot, space_key, channel)
+  for space_key, space_params of PROJECT_SETTINGS
+    for api_key, api_params of space_params
+      load_space_params(robot, space_key, api_key)
+      for channel, prj_ary of api_params
+        initialize_pos(robot, space_key, channel)
 
   #--------------------------------------------------------------------
   # スペースのパラメータを再読み込み
@@ -281,6 +282,7 @@ load_space_params = (robot, space_key, api_key) ->
                       .query(apiKey: api_key)
                       .get()
   request (err, res, body) ->
+    console.log("#{space_key} / #{api_key} / #{body}")
     robot.brain.set(get_task_status_key(space_key), body)
 
   # 完了理由を取得
@@ -288,6 +290,7 @@ load_space_params = (robot, space_key, api_key) ->
                       .query(apiKey: api_key)
                       .get()
   request (err, res, body) ->
+    console.log("#{space_key} / #{api_key} / #{body}")
     robot.brain.set(get_task_resolution_key(space_key), body)
 
   return true
