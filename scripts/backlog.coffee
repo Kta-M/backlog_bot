@@ -150,6 +150,8 @@ cron_func = () ->
                       .query('activityTypeId[2]': ACTION_TYPE['task_comment']['id'])
                       .get()
   request (err, res, body) ->
+    return if !body
+
     json = JSON.parse body
     req_space_key  = res['req']['_headers']['host'].replace(/\.backlog\.jp/, '')
     req_api_key    = res['req']['path'].replace(/\/api\/v2\/space\/activities\?apiKey=/, '').replace(/&count.*/, '')
