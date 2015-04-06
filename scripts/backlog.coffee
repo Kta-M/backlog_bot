@@ -121,7 +121,7 @@ module.exports = (robot) ->
   second = 0
   for sk, sv of PROJECT_SETTINGS
     for ak, av of sv
-      second = ((second + 5) % 60) + Math.floor((second + 5) / 60)
+      second = ((second + 10) % 60) + Math.floor((second + 10) / 60)
       second = '*' if IS_DEBUG
       
       # 毎分確認
@@ -168,7 +168,9 @@ cron_func = () ->
     # 前回更新地点を探す
     last_id_idx = get_last_id_idx(json, last_id)
     console.log("search_last_id [#{api_key[0..5]}] > last_id -> #{last_id} / last_id_idx -> #{last_id_idx}")
-    return if !last_id_idx
+    if !last_id_idx
+      robot.brain.set(last_id_key, json[0].id)
+      return
 
     # 更新分を表示していく
     for update_idx in [last_id_idx-1..0]
